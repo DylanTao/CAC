@@ -29,6 +29,28 @@ class Section:
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), indent=indent)
     
+    @classmethod
+    def from_dict(cls, data):
+        section = cls(
+            section_id=data.get("section_id", ""),
+            title=data.get("title", ""),
+            content=data.get("content", ""),
+            summary=data.get("summary", ""),
+            word_limit=data.get("word_limit", 2000)
+        )
+        for child_data in data.get("children", []):
+            child = cls.from_dict(child_data)
+            section.add_child(child)
+        return section
+
+    def to_json(self, indent=None):
+        return json.dumps(self.to_dict(), indent=indent)
+    
+    @classmethod
+    def from_json(cls, json_string):
+        data = json.loads(json_string)
+        return cls.from_dict(data)
+    
     def apply_word_limit(self):
         """
         Apply the word limit to the content of the section and its children
@@ -54,6 +76,15 @@ class Section:
         self.content = ""
         for i, chunk in enumerate(chunks):
             self.add_child(Section(f"{self.section_id}_c{i}", "", chunk, "", self.word_limit))
+    
+    def get_section(self, section_id):
+        if self.section_id == section_id:
+            return self
+        for child in self.children:
+            found_section = child.get_section(section_id)
+            if found_section is not None:
+                return found_section
+        return None
 
 def extract_text_from_pdf(file_path):
     with open(file_path, "rb") as file:
