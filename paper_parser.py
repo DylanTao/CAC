@@ -1,4 +1,59 @@
 import PyPDF2
+import json
+
+class Section:
+    """
+    A section of a paper
+    """
+    def __init__(self, section_id: str = "", title: str = "", content: str = "", summary: str = "", word_limit: int = 2000):
+        self.section_id = section_id
+        self.title = title
+        self.content = content
+        self.children = []
+        self.summary = summary
+        self.word_limit = word_limit
+
+    def add_child(self, child):
+        self.children.append(child)
+
+    def to_dict(self):
+        return {
+            "section_id": self.section_id,
+            "title": self.title,
+            "content": self.content,
+            "summary": self.summary,
+            "children": [child.to_dict() for child in self.children],
+            "word_limit": self.word_limit
+        }
+
+    def to_json(self, indent=None):
+        return json.dumps(self.to_dict(), indent=indent)
+    
+    def apply_word_limit(self):
+        """
+        Apply the word limit to the content of the section and its children
+        If the content of the section is longer than the word limit, the content will be split into chunks
+        Chunks are ending with complete sentences, and appended to the children of the section
+        """
+        if len(self.children) > 0:
+            for child in self.children:
+                child.apply_word_limit()
+        if len(self.content.split(" ")) <= self.word_limit:
+            return
+        # Split the content into sentences
+        sentences = self.content.split(". ")
+        words_in_sentences = [len(sentence.split(" ")) for sentence in sentences]
+        chunks = []
+        current_chunk = ""
+        for i, sentence in enumerate(sentences):
+            if len(current_chunk.split(" ")) + words_in_sentences[i] > self.word_limit:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            current_chunk += sentence + ". "
+        chunks.append(current_chunk)
+        self.content = ""
+        for i, chunk in enumerate(chunks):
+            self.add_child(Section(f"{self.section_id}_c{i}", "", chunk, "", self.word_limit))
 
 def extract_text_from_pdf(file_path):
     with open(file_path, "rb") as file:
@@ -11,12 +66,12 @@ def extract_text_from_pdf(file_path):
 def parse_sections(text):
     def get_next_valid_sections(current_section):
         next_sections = []
-        next_sections.append([current_section[0] + 1])
-        next_sections.append(current_section[:-1] + [current_section[-1] + 1])
+        for i in range(len(current_section)):
+            next_sections.append(current_section[:i] + [current_section[i] + 1])
         next_sections.append(current_section + [1])
         return next_sections
     
-    def is_next_valid_section(current_section, next_section):
+    def next_valid_section_score(current_section, next_section):
         if current_section in get_next_valid_sections(next_section):
             return get_next_valid_sections(next_section).index(current_section) + 1
         return 0
@@ -34,8 +89,8 @@ def parse_sections(text):
         first_word = line.split(" ")[0]
         if first_word.replace(".", "").isdigit() and first_word[-1] != ".":
             # Get section code
-            section_code = list(map(int, first_word.split(".")))
-            section_candidates.append({"code": section_code, "line": i})
+            section_id = list(map(int, first_word.split(".")))
+            section_candidates.append({"code": section_id, "line": i})
         if first_word.lower().startswith("contents") or line.lower().startswith("table of contents") and not has_contents:
             has_contents = True
             contents_start = i
@@ -57,8 +112,8 @@ def parse_sections(text):
             first_word = line.split(" ")[0]
             if first_word.replace(".", "").isdigit() and first_word[-1] != ".":
                 # Get section code
-                section_code = list(map(int, first_word.split(".")))
-                section_candidates.remove(next(c for c in section_candidates if c["code"] == section_code))
+                section_id = list(map(int, first_word.split(".")))
+                section_candidates.remove(next(c for c in section_candidates if c["code"] == section_id))
     
     # Find the first candidate with code [1], remove all candidates before it
     for i, candidate in enumerate(section_candidates):
@@ -71,10 +126,9 @@ def parse_sections(text):
             break
     
     # Add abstract section
-    sections["abstract"] = {
-        "title": "Abstract",
-        "content": "\n".join(lines[abstract_start + 1:abstract_end]).strip()
-    }
+    root_section = Section(None, "Root", "")
+    abstract_section = Section("abstract", "Abstract", "\n".join(lines[abstract_start + 1:abstract_end]).strip())
+    root_section.add_child(abstract_section)
     
     for i, candidate in enumerate(section_candidates):
         if candidate["line"] < selected_section_candidates[-1]["line"]:
@@ -83,35 +137,37 @@ def parse_sections(text):
         remaining_sections = [c["code"] for c in section_candidates[i + 1:]]
         scores = []
         for remaining_section in remaining_sections:
-            scores.append(is_next_valid_section(remaining_section, current_section))
+            scores.append(next_valid_section_score(remaining_section, current_section))
         if sum(scores) == 0:
             continue
         best_score_index = scores.index(max(scores)) + i + 1
         selected_section_candidates.append(section_candidates[best_score_index])
 
+    current_parent = root_section
     for i, candidate in enumerate(selected_section_candidates):
         current_code = candidate["code"]
-        title = lines[candidate["line"]].strip()
         if i < len(selected_section_candidates) - 1:
-            # If there's a next match, use its line number as the end index for the current section
             end_index = selected_section_candidates[i + 1]["line"]
         else:
-            # If this is the last match, use the end of the text as the end index
             end_index = reference_start
 
-        section_content = "\n".join(lines[candidate["line"] + 1:end_index]).strip()
-        sections[".".join(map(str, current_code))] = {
-            "title": title,
-            "content": section_content
-        }
+        section_title = lines[candidate["line"]].strip()
+        section_content = "\n".join(lines[candidate["line"]:end_index]).strip()
+        current_section = Section(".".join(map(str, current_code)), section_title, section_content)
 
-    sections["references"] = {
-        "title": "References",
-        "content": "\n".join(lines[reference_start + 1:]).strip()
-    }
+        # Determine the parent of the current section
+        while current_parent.section_id is not None and len(current_section.section_id) <= len(current_parent.section_id):
+            current_parent = current_parent.parent if current_parent.parent else root_section
 
-    return sections
+        current_section.parent = current_parent
+        current_parent.add_child(current_section)
+        current_parent = current_section
 
+    # Add references section
+    references_section = Section("references&appendix", "References", "\n".join(lines[reference_start + 1:]).strip())
+    root_section.add_child(references_section)
+
+    return root_section
 
 def main():
     file_path = "data/ZLeaks.pdf"
