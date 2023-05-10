@@ -1,5 +1,6 @@
 import PyPDF2
 import json
+from tqdm import tqdm
 
 class Section:
     """
@@ -90,11 +91,12 @@ def extract_text_from_pdf(file_path):
     with open(file_path, "rb") as file:
         pdf_reader = PyPDF2.PdfReader(file)
         text = ""
-        for page in pdf_reader.pages:
+        for page in tqdm(pdf_reader.pages, desc="Extracting text"):
             text += page.extract_text()
     return text
 
-def parse_sections(text):
+def parse_sections(file_path):
+    text = extract_text_from_pdf(file_path)
     def get_next_valid_sections(current_section):
         next_sections = []
         for i in range(len(current_section)):
