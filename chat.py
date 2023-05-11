@@ -1,6 +1,4 @@
-import openai
 import json
-from typing import List
 from pdf_parser import ContextNode
 from api import Message, send_messages
 
