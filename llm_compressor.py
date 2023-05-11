@@ -1,12 +1,21 @@
-from typing import List
+from typing import Tuple
 from api import Message, send_messages
+import nltk
+from nltk import word_tokenize
+from nltk.corpus import stopwords
+from nltk.probability import FreqDist
+from collections import Counter
+
+nltk.download('punkt')
+nltk.download('averaged_perceptron_tagger')
+nltk.download('stopwords')
 
 # TODO: Use tiktoken to count the tokenized text length
 
 SYSTEM_PROMPT = """
 You will be given a long text in triple single quotes. Think about this step by step:
 - User will specify the compression ratio and maximum word count.
-- Generate a TL;DR version of the text that is compressed to the specified compression ratio and 
+- Generate a short summary of the text that is compressed to the specified compression ratio and 
 maximum word count.
 - The compressed text should maintain the original meaning, tense, tone, and structure.
 - The compressed text should be one paragraph.
@@ -51,3 +60,22 @@ def compress(text, compression_ratio: str = "1/4", max_words: int = "150"):
         return response_message.content
     compressed_text = response_message.content.split("'''")[1]
     return compressed_text
+
+def generate_title_and_summary(text: str, compression_ratio: str = "1/4", max_words: int = 150) -> Tuple[str, str]:
+    # Generate the summary
+    summary = compress(text, compression_ratio, max_words)
+
+    # Tokenize the text
+    tokens = word_tokenize(text.lower())
+    # Remove stopwords and punctuation
+    stop_words = set(stopwords.words("english"))
+    filtered_tokens = [word for word in tokens if word.isalnum() and word not in stop_words]
+
+    # Calculate word frequency and choose the top 3 keywords
+    word_freq = FreqDist(filtered_tokens)
+    top_keywords = [word for word, freq in word_freq.most_common(3)]
+
+    # Generate the title
+    title = f"{' '.join(top_keywords).title()}"
+
+    return title, summary

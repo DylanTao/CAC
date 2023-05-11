@@ -1,8 +1,27 @@
 import PyPDF2
 import json
 import argparse
+import spacy
 from tqdm import tqdm
-from llm_compressor import compress
+from llm_compressor import compress, generate_title_and_summary
+
+class TOCNode:
+    def __init__(self, node_id: str, title: str, page_number: int):
+        self.node_id = node_id
+        self.title = title
+        self.page_number = page_number
+        self.children = []
+    
+    def add_child(self, child):
+        self.children.append(child)
+    
+    def __repr__(self) -> str:
+        return f"{self.title} (Page {self.page_number})"
+    
+    def display(self, level=0):
+        print("  " * level + str(self))
+        for child in self.children:
+            child.display(level + 1)
 
 class ContextNode:
     def __init__(self, node_id: str, title: str = "", content: str = "", summary: str = ""):
@@ -65,24 +84,32 @@ class ContextNode:
             id_list += child.get_id_list()
         return id_list
 
-    def generate_summary(self, recursive: bool = True, compression_ratio: str = "1/4"):
+    def generate_summary(self, recursive: bool = True, compression_ratio: str = "1/4", title: bool = False):
         """
         Generate the summary of the node and its children
         """
         if len(self.children) > 0 and recursive:
             for child in self.children:
-                child.generate_summary()
+                child.generate_summary(recursive, compression_ratio, title)
         children_summaries = [child.summary for child in self.children]
         if self.node_id.startswith("references&appendix"):
             return
         print(f"Generating summary for {self.node_id}")
-        self.summary = compress(self.content + "\n".join(children_summaries), compression_ratio)
+        if title:
+            generated_title, summary = generate_title_and_summary(self.content + "\n".join(children_summaries), compression_ratio)
+            self.title = generated_title
+            self.summary = summary
+        else:
+            self.summary = compress(self.content + "\n".join(children_summaries), compression_ratio)
+        print(f"Title: {self.title}")
         print(f"Summary length: {len(self.summary.split(' '))} words")
     
     def get_context(self, depth: int = 0, original: bool = False):
         """
         Get the context of the node and its children
         """
+        if depth > 0 and len(self.children) == 0:
+            original = True
         if depth < 0:
             content = "Hidden"
             summary = "Hidden"
@@ -214,19 +241,48 @@ def parse_paper(file_path):
 
     return root_node
 
-def parse_unstructured(file_path):
-    # TODO: Implement parse_unstructured to parse PDF files based on pages
-    pass
+def parse_by_page(file_path):
+    with open(file_path, "rb") as file:
+        pdf_reader = PyPDF2.PdfReader(file)
+        root_node = ContextNode("root", "Root", "")
+        for i, page in tqdm(enumerate(pdf_reader.pages), total=len(pdf_reader.pages), desc="Processing pages"):
+            text = page.extract_text()
+            node_id = f"p_{i + 1}"
+            title = f"{i + 1}"
+            content = text.strip()
+            page_node = ContextNode(node_id, title, content)
+            root_node.add_child(page_node)
+    return root_node
+
+def parse_by_contents(file_path, contents_path):
+    with open(file_path, "rb") as file:
+        pdf_reader = PyPDF2.PdfReader(file)
+        root_node = ContextNode("root", "Root", "")
+        with open(contents_path, "r") as contents_file:
+            contents = json.load(contents_file)
+            for i, page in tqdm(enumerate(pdf_reader.pages), total=len(pdf_reader.pages), desc="Processing pages"):
+                text = page.extract_text()
+                node_id = f"p_{i + 1}"
+                title = f"{i + 1}"
+                content = text.strip()
+                page_node = ContextNode(node_id, title, content)
+                root_node.add_child(page_node)
+    return root_node
 
 def main():
     parser = argparse.ArgumentParser(description="Generate summaries from PDF files")
     parser.add_argument("-i", "--input", type=str, help="The PDF file to generate summaries from")
     parser.add_argument("-c", "--compression-ratio", type=str, default="1/4", help="The compression ratio to use")
     parser.add_argument("-o", "--output", type=str, default="summary.json", help="The output json file")
+    parser.add_argument("-u", "--unstructured", action="store_true", help="Parse the PDF file as unstructured text")
     args = parser.parse_args()
 
-    root_node = parse_paper(args.input)
-    root_node.generate_summary(args.compression_ratio)
+    if args.unstructured:
+        root_node = parse_by_page(args.input)
+        root_node.generate_summary(True, args.compression_ratio, True)
+    else:
+        root_node = parse_paper(args.input)
+        root_node.generate_summary(True, args.compression_ratio, False)
     with open(args.output, "w") as file:
         file.write(root_node.to_json())
 
