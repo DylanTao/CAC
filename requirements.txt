@@ -2,3 +2,5 @@ PyPDF2
 tqdm
 openai
 streamlit
+nltk
+clipboard
