@@ -1,9 +1,8 @@
 import PyPDF2
 import json
 import argparse
-import spacy
 from tqdm import tqdm
-from llm_compressor import compress, generate_title_and_summary
+from llm_compressor import compress
 
 class TOCNode:
     def __init__(self, node_id: str, title: str, page_number: int):
@@ -36,7 +35,7 @@ class ContextNode:
 
     def to_dict(self):
         return {
-            "node_id": self.node_id,
+            "id": self.node_id,
             "title": self.title,
             "content": self.content,
             "summary": self.summary,
@@ -49,7 +48,7 @@ class ContextNode:
     @classmethod
     def from_dict(cls, data):
         node = cls(
-            node_id=data.get("node_id", ""),
+            node_id=data.get("id", ""),
             title=data.get("title", ""),
             content=data.get("content", ""),
             summary=data.get("summary", ""),
@@ -92,15 +91,13 @@ class ContextNode:
             for child in self.children:
                 child.generate_summary(recursive, compression_ratio, title)
         children_summaries = [child.summary for child in self.children]
-        if self.node_id.startswith("references&appendix"):
+        if "references&appendix" in self.node_id:
             return
         print(f"Generating summary for {self.node_id}")
+        generated_title, summary = compress(self.content + "\n".join(children_summaries), compression_ratio)
         if title:
-            generated_title, summary = generate_title_and_summary(self.content + "\n".join(children_summaries), compression_ratio)
             self.title = generated_title
-            self.summary = summary
-        else:
-            self.summary = compress(self.content + "\n".join(children_summaries), compression_ratio)
+        self.summary = summary
         print(f"Title: {self.title}")
         print(f"Summary length: {len(self.summary.split(' '))} words")
     
@@ -111,22 +108,31 @@ class ContextNode:
         if depth > 0 and len(self.children) == 0:
             original = True
         if depth < 0:
-            content = "Hidden"
-            summary = "Hidden"
+            content = ""
+            summary = ""
         else:
-            content = self.content if original else "Hidden"
-            summary = self.summary if not original else "Hidden"
-
+            content = self.content if original else ""
+            summary = self.summary if not original else ""
         context = {
-            "node_id": self.node_id,
-            "title": self.title,
-            "content": content,
-            "summary": summary,
-            "children": []
+            "id": self.node_id,
+            "title": self.title
         }
+        if content != "":
+            context["content"] = content
+        if summary != "":
+            context["summary"] = summary
+        if self.children == []:
+            return context
+        context["children"] = []
         for child in self.children:
             context["children"].append(child.get_context(depth - 1, original=False))
         return context
+    
+    def prepend_node_id(self, node_id):
+        if not self.node_id.startswith(node_id):
+            self.node_id = node_id + "." + self.node_id
+        for child in self.children:
+            child.prepend_node_id(node_id)
 
 def extract_text_from_pdf(file_path):
     print(f"Extracting text from {file_path}")
@@ -137,8 +143,10 @@ def extract_text_from_pdf(file_path):
             text += page.extract_text()
     return text
 
+
 def parse_paper(file_path):
     text = extract_text_from_pdf(file_path)
+    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
     def get_next_valid_nodes(current_node):
         next_nodes = []
         for i in range(len(current_node)):
@@ -198,7 +206,7 @@ def parse_paper(file_path):
             break
     
     # Add abstract node
-    root_node = ContextNode("root", "Root", "")
+    root_node = ContextNode(root_id, root_id, "")
     abstract_node = ContextNode("abstract", "Abstract", "\n".join(lines[abstract_start + 1:abstract_end]).strip())
     root_node.add_child(abstract_node)
     
@@ -228,7 +236,7 @@ def parse_paper(file_path):
         current_node = ContextNode(".".join(map(str, current_code)), node_title, node_content)
 
         # Determine the parent of the current node
-        while current_parent.node_id != "root" and len(current_node.node_id) <= len(current_parent.node_id):
+        while current_parent.node_id != root_id and len(current_node.node_id) <= len(current_parent.node_id):
             current_parent = current_parent.parent if current_parent.parent else root_node
 
         current_node.parent = current_parent
@@ -239,27 +247,32 @@ def parse_paper(file_path):
     references_node = ContextNode("references&appendix", "References", "\n".join(lines[reference_start + 1:]).strip())
     root_node.add_child(references_node)
 
+    # Finally, prepend all node ids with the root id
+    root_node.prepend_node_id(root_id)
     return root_node
 
 def parse_by_page(file_path):
+    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
     with open(file_path, "rb") as file:
         pdf_reader = PyPDF2.PdfReader(file)
-        root_node = ContextNode("root", "Root", "")
+        root_node = ContextNode(root_id, root_id, "")
         for i, page in tqdm(enumerate(pdf_reader.pages), total=len(pdf_reader.pages), desc="Processing pages"):
             text = page.extract_text()
-            node_id = f"p_{i + 1}"
+            node_id = f"p{i + 1}"
             title = f"{i + 1}"
             content = text.strip()
             page_node = ContextNode(node_id, title, content)
             root_node.add_child(page_node)
+    root_node.prepend_node_id(root_id)
     return root_node
 
-def parse_by_contents(file_path, contents_path):
+def parse_by_TOC(file_path, contents_path):
+    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
     with open(file_path, "rb") as file:
         pdf_reader = PyPDF2.PdfReader(file)
         root_node = ContextNode("root", "Root", "")
         with open(contents_path, "r") as contents_file:
-            contents = json.load(contents_file)
+            toc = json.load(contents_file)
             for i, page in tqdm(enumerate(pdf_reader.pages), total=len(pdf_reader.pages), desc="Processing pages"):
                 text = page.extract_text()
                 node_id = f"p_{i + 1}"

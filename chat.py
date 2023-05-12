@@ -6,41 +6,31 @@ from pdf_parser import ContextNode
 from api import Message, send_messages
 
 SYSTEM_PROMPT = """
-You are an AI designed to output answers to question based on some documents in JSON format.
-Your answers should be as detailed as possible, unless otherwise specified.
-You should actively ask for more details.
-Think about this step by step:
-1. User will provide a JSON string of the summarized contexts of each parts of the document.
-2. User will ask a question
-3. If the question is a general question not asking specifically about a part of the document,
-you need to keep the context in mind and answer the question with your own knowledge.
-4. You need to find the part of the document that answers the question if the question needs
-to be answered with knowledge from the document.
-5. If you believe the summarized version of document is not enough to answer the question,
-you need to request for more details with in the following format:
-    {"response_type": "request", "targets": [<node_ids>], "original": true/false}
-where <node_ids> are a list of the node_ids in the JSON string. "original" is True if you need the
-original version, False if you need the summarized version. You should request for the original
-text if answer is not found in the summarized version.
-Pay close attention to the keywords in the question to determine which node_ids to request.
-6. Once you have the information you need, output the answer in the following format:
-    {"response_type": "answer", "content": "<answer>", "references": ["<node_id>", ...]},
-where <answer> is the answer to the question, and references is a list of any node_id that you used to answer the question.
-7. Always use double quotes for keys and values in the JSON string. Always reply with JSON string only.
-8. If user tells you request is invalid, or you cannot locate the answer in the context, it is
-possible that you requested for the wrong context. Try requesting for the node_id "root" to get
-the full context, then try requesting a different node_id.
-9. If you want to ask user to explain the question, reply with response_type "answer" and content
+As an AI, you provide answers to questions based on JSON-formatted documents. Follow these steps:
+1. User provides a JSON string of summarized document contexts.
+2. User asks a question.
+3. For general questions, answer using your own knowledge, considering the context.
+4. For document-specific questions, locate the relevant part of the document. Hint: if you don't know where to look at, guess one.
+5. If the summarized context is insufficient, request more details:
+   {"response_type": "request", "targets": [<node_ids>], "original": true/false}
+   Choose "original" based on whether you need the original or summarized version.
+6. Once you have the necessary information, answer like this:
+   {"response_type": "answer", "content": "<answer>", "references": ["<node_id>", ...]}
+7. Use double quotes for keys and values in JSON strings. Reply only with JSON strings.
+8. If your request is invalid, or you can't find the answer, request the "root" node_id or a different one.
+9. If you need the user to clarify the question, use "answer" as the response_type and request clarification.
+
+Reminders:
+- Avoid requesting previously requested node_ids. If you can't find the answer, request a different node_id or ask for clarification.
+- Pay close attention to the context tree. A node may have completely different contexts from another node on the same level.
+- Pay close attention to the previous questions. The user may be asking questions based on previous conversations.
+- Answer with as many details as possible, unless otherwise specified.
 
 Example:
 Context: {...}
+Previous Requests: ["2"]
 Question: What is the thread model introduced in the paper?
-Assistant: {"response_type": "request", "targets": ["2"], "original": true}
-
-Example:
-Context: {...}
-Question: What is the thread model introduced in the paper?
-Assistant: {"response_type": "answer", "content": "The thread model introduced in the paper is ...", "references": ["1"]}
+Assistant: {"response_type": "request", "targets": ["3"], "original": true}
 """
 
 class ContextChatBot:
@@ -50,14 +40,15 @@ class ContextChatBot:
         self.curr_question = curr_question
         self.current_contexts = str(self.root_node.get_context(1))
         self.clipboard_mode = clipboard_mode
+        self.previous_requests = []
 
     def load_contexts(self, file_path: str):
         with open(file_path, "r") as f:
             json_string = f.read()
         self.root_node = ContextNode.from_json(json_string)
 
-    def pop_history(self):
-        self.history = self.history[:1] + self.history[3:]
+    def pop_history(self, n: int = 1):
+        self.history = self.history[:1] + self.history[1+n:]
 
     def reset_history(self):
         self.history = [Message("system", SYSTEM_PROMPT)]
@@ -86,8 +77,9 @@ class ContextChatBot:
     def prepare_user_message(self, question: str, contexts: str):
         question_prompt = f"Question: {question}\n"
         context_prompt = f"Contexts: {contexts}\n"
+        previous_requests_prompt = f"Previous Requests: {self.previous_requests}\n"
         json_reminder = "Remember to output a valid JSON string.\n"
-        return Message("user", question_prompt + context_prompt + json_reminder)
+        return Message("user", context_prompt + previous_requests_prompt + question_prompt + json_reminder)
 
     def process_response(self, response_content: str):
         response_content = self.extract_json(response_content)
@@ -98,8 +90,10 @@ class ContextChatBot:
             return response_content, []
 
         if response['response_type'] == 'request':
+            self.previous_requests += response['targets']
             return self.handle_request_response(response)
         elif response['response_type'] == 'answer':
+            self.previous_requests = []
             return self.handle_answer_response(response)
         else:
             print("Invalid response type")
@@ -119,6 +113,8 @@ class ContextChatBot:
             return content, False
 
     def handle_request_response(self, response: dict):
+        if len(self.history) >= 6:
+            self.pop_history(2)
         print(f"AI requesting node_id: {response['targets']}")
         node_ids = response['targets']
         nodes, contexts = self.get_nodes_and_contexts(node_ids, response["original"])
@@ -150,23 +146,36 @@ class ContextChatBot:
 
 def main():
     parser = argparse.ArgumentParser(description="Interact with ContextChatBot")
-    parser.add_argument('--read-json', '-r', type=str, required=True, help="Path to the JSON file with context data")
+    parser.add_argument('--read-json', '-r', nargs='+', required=True, help="Path to one or more JSON files with context data")
     parser.add_argument('--clipboard-mode', '-c', action='store_true', help="Enable clipboard mode")
 
     args = parser.parse_args()
 
-    if not os.path.isfile(args.read_json):
-        print(f"Error: File {args.read_json} does not exist.")
-        return
-
-    if not is_valid_json(args.read_json):
-        print(f"Error: {args.read_json} is not a valid JSON file.")
-        return
-
-    with open(args.read_json, "r") as f:
-        json_string = f.read()
+    root_node = ContextNode("root")
+    if len(args.read_json) == 1:
+        if not os.path.isfile(args.read_json[0]):
+            print(f"Error: File {args.read_json[0]} does not exist.")
+            return
+        if not is_valid_json(args.read_json[0]):
+            print(f"Error: {args.read_json[0]} is not a valid JSON file.")
+            return
+        with open(args.read_json[0], "r") as f:
+            json_string = f.read()
+        root_node = ContextNode.from_json(json_string)
+    else:
+        for json_file in args.read_json:
+            if not os.path.isfile(json_file):
+                print(f"Error: File {json_file} does not exist.")
+                return
+            if not is_valid_json(json_file):
+                print(f"Error: {json_file} is not a valid JSON file.")
+                return
+            with open(json_file, "r") as f:
+                json_string = f.read()
+            root_node.add_child(ContextNode.from_json(json_string))
     
-    root_node = ContextNode.from_json(json_string)
+    print(f"Context data loaded:\n{str(root_node.to_dict())}")
+
     chatbot = ContextChatBot(root_node, clipboard_mode=args.clipboard_mode)
 
     print("Type 'exit' to quit the application.")
