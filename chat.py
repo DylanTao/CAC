@@ -13,6 +13,7 @@ As an AI, you provide answers to questions based on JSON-formatted documents. Fo
 4. For document-specific questions, locate the relevant part of the document. Hint: if you don't know where to look at, guess one.
 5. If the summarized context is insufficient, request more details:
    {"response_type": "request", "targets": [<node_ids>], "original": true/false}
+   node_ids in targets must be exactly the same as the ones in the provided JSON string.
    Choose "original" based on whether you need the original or summarized version.
 6. Once you have the necessary information, answer like this:
    {"response_type": "answer", "content": "<answer>", "references": ["<node_id>", ...]}
@@ -28,9 +29,9 @@ Reminders:
 
 Example:
 Context: {...}
-Previous Requests: ["2"]
+Previous Requests: ["doc.2"]
 Question: What is the thread model introduced in the paper?
-Assistant: {"response_type": "request", "targets": ["3"], "original": true}
+Assistant: {"response_type": "request", "targets": ["doc.3"], "original": true}
 """
 
 class ContextChatBot:
@@ -72,7 +73,6 @@ class ContextChatBot:
             response_content = response_message.content
 
         return self.process_response(response_content)
-
 
     def prepare_user_message(self, question: str, contexts: str):
         question_prompt = f"Question: {question}\n"
