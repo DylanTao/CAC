@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 from chat import ContextChatBot
-from pdf_parser import ContextNode
+from encoder import ContextNode
 
 # Create an instance of the chatbot
 chatbot = ContextChatBot(ContextNode("root"))

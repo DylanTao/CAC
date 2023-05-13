@@ -2,7 +2,7 @@ import json
 import clipboard
 import argparse
 import os
-from pdf_parser import ContextNode
+from encoder import ContextNode
 from api import Message, send_messages
 from typing import Tuple, List
 
