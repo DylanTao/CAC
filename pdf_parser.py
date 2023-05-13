@@ -1,6 +1,7 @@
 import PyPDF2
 import json
 import argparse
+import os
 from tqdm import tqdm
 from llm_compressor import compress
 
@@ -83,7 +84,7 @@ class ContextNode:
             id_list += child.get_id_list()
         return id_list
 
-    def generate_summary(self, recursive: bool = True, compression_ratio: str = "1/4", title: bool = False):
+    def generate_summary(self, recursive: bool = True, compression_ratio: str = "1/4", title: bool = False, desc: str = "document"):
         """
         Generate the summary of the node and its children
         """
@@ -94,7 +95,7 @@ class ContextNode:
         if "references&appendix" in self.node_id:
             return
         print(f"Generating summary for {self.node_id}")
-        generated_title, summary = compress(self.content + "\n".join(children_summaries), compression_ratio)
+        generated_title, summary = compress(self.content + "\n".join(children_summaries), compression_ratio, desc=desc)
         if title:
             self.title = generated_title
         self.summary = summary
@@ -133,6 +134,38 @@ class ContextNode:
             self.node_id = node_id + "." + self.node_id
         for child in self.children:
             child.prepend_node_id(node_id)
+    
+    def apply_word_limit(self, limit: int = 2000, overlap: int = 100, recursive: bool = True):
+        words = self.content.split()
+        print(f"Word count for {self.node_id}: {len(words)}")
+        if len(words) <= limit:
+            return
+
+        # Split content into chunks
+        chunks = []
+        while len(words) > limit:
+            chunk = words[:limit]
+            chunks.append(chunk)
+            words = words[limit-overlap:]
+        if len(words) > 0:
+            chunks.append(words)
+        print(f"Chunked {self.node_id} into {len(chunks)} chunks")
+        # Assign chunked content to child nodes
+        self.children = []
+        for i, chunk in enumerate(chunks):
+            node_id = f"{self.node_id}.chunk_{i+1}"
+            node_title = f"Chunk {i+1}"
+            node_content = " ".join(chunk)
+            chunk_node = ContextNode(node_id, title=node_title, content=node_content)
+            self.children.append(chunk_node)
+
+        # Replace the original content with a string indicating that contents are chunked and in children
+        self.content = f"Content is too long and is chunked into {len(chunks)} child nodes."
+
+        # Recursively apply word limit to child nodes
+        if recursive:
+            for child in self.children:
+                child.apply_word_limit(limit, overlap, recursive)
 
 def extract_text_from_pdf(file_path):
     print(f"Extracting text from {file_path}")
@@ -143,10 +176,9 @@ def extract_text_from_pdf(file_path):
             text += page.extract_text()
     return text
 
-
 def parse_paper(file_path):
     text = extract_text_from_pdf(file_path)
-    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
+    root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     def get_next_valid_nodes(current_node):
         next_nodes = []
         for i in range(len(current_node)):
@@ -251,8 +283,21 @@ def parse_paper(file_path):
     root_node.prepend_node_id(root_id)
     return root_node
 
+def parse_unstructured(file_path):
+    root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
+    text = ""
+    if file_path.endswith(".pdf"):
+        text = extract_text_from_pdf(file_path)
+    elif file_path.endswith(".txt"):
+        with open(file_path, "r") as file:
+            text = file.read()
+    else:
+        raise Exception("Unsupported file format")
+    root_node = ContextNode(root_id, root_id, text)
+    return root_node
+
 def parse_by_page(file_path):
-    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
+    root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     with open(file_path, "rb") as file:
         pdf_reader = PyPDF2.PdfReader(file)
         root_node = ContextNode(root_id, root_id, "")
@@ -267,7 +312,7 @@ def parse_by_page(file_path):
     return root_node
 
 def parse_by_TOC(file_path, contents_path):
-    root_id = file_path.split("/")[-1].split(".")[0].replace(" ", "_").lower()
+    root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     with open(file_path, "rb") as file:
         pdf_reader = PyPDF2.PdfReader(file)
         root_node = ContextNode("root", "Root", "")
@@ -286,18 +331,47 @@ def main():
     parser = argparse.ArgumentParser(description="Generate summaries from PDF files")
     parser.add_argument("-i", "--input", type=str, help="The PDF file to generate summaries from")
     parser.add_argument("-c", "--compression-ratio", type=str, default="1/4", help="The compression ratio to use")
-    parser.add_argument("-o", "--output", type=str, default="summary.json", help="The output json file")
+    parser.add_argument("-o", "--output", type=str, help="The output json file")
     parser.add_argument("-u", "--unstructured", action="store_true", help="Parse the PDF file as unstructured text")
+    parser.add_argument("-t", "--toc", type=str, help="The table of contents of the PDF file in JSON formatj")
+    parser.add_argument("-p", "--page", action="store_true", help="Parse the PDF file by page")
+    parser.add_argument("-d", "--desc", type=str, help="The description of the file to help encoder generate better summaries")
+    parser.add_argument("-m", "--max-word", type=int, default=200, help="The maximum number of words in the summary")
     args = parser.parse_args()
 
-    if args.unstructured:
-        root_node = parse_by_page(args.input)
-        root_node.generate_summary(True, args.compression_ratio, True)
+    # Check if input is directory
+    if os.path.isdir(args.input):
+        file_paths = [os.path.join(args.input, filename) for filename in os.listdir(args.input) if filename.endswith('.pdf') or filename.endswith('.txt')]
+        file_paths = [f'"{fp}"' for fp in file_paths]  # Enclose file paths in double quotes
+        print(file_paths)
     else:
-        root_node = parse_paper(args.input)
-        root_node.generate_summary(True, args.compression_ratio, False)
-    with open(args.output, "w") as file:
-        file.write(root_node.to_json())
+        file_paths = [args.input]
+
+    for file_path in file_paths:
+        if args.unstructured:
+            root_node = parse_unstructured(args.input)
+            root_node.apply_word_limit()
+            root_node.generate_summary(True, args.compression_ratio, True, args.desc)
+        elif args.page:
+            root_node = parse_by_page(args.input)
+            root_node.apply_word_limit(args.max_word)
+            root_node.generate_summary(True, args.compression_ratio, True, args.desc)
+        else:
+            root_node = parse_paper(args.input)
+            root_node.apply_word_limit(args.max_word)
+            root_node.generate_summary(True, args.compression_ratio, False, args.desc)
+
+        # Create output file path
+        if args.output is not None:
+            if os.path.isdir(args.output):
+                output_file_path = os.path.join(args.output, os.path.splitext(os.path.basename(file_path))[0] + '.json')
+            else:
+                output_file_path = args.output
+        else:
+            output_file_path = os.path.splitext(file_path)[0] + '.json'
+
+        with open(output_file_path, "w") as file:
+            file.write(root_node.to_json())
 
 if __name__ == "__main__":
     main()
