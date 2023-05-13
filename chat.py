@@ -4,34 +4,47 @@ import argparse
 import os
 from pdf_parser import ContextNode
 from api import Message, send_messages
+from typing import Tuple, List
 
 SYSTEM_PROMPT = """
 As an AI, you provide answers to questions based on JSON-formatted documents. Follow these steps:
 1. User provides a JSON string of summarized document contexts.
-2. User asks a question.
-3. For general questions, answer using your own knowledge, considering the context.
-4. For document-specific questions, locate the relevant part of the document. Hint: if you don't know where to look at, guess one.
+2. User asks a question or makes a statement. If you believe user is not seeking an answer about the document, behave like a normal chatbot, answer with response_type "answer".
+3. Consider the context and your own knowledge to generate a response. Don't just look for explicit answers, but also try to infer and reason based on the information given.
+4. For document-specific questions, locate the relevant part of the document. Guess one if you don't know where to look.
 5. If the summarized context is insufficient, request more details:
-   {"response_type": "request", "targets": [<node_ids>], "original": true/false}
-   node_ids in targets must be exactly the same as the ones in the provided JSON string.
+   {"response_type": "request", "targets": [<node_ids>], "reasoning": "<reasoning>", "original": true/false}
    Choose "original" based on whether you need the original or summarized version.
+   node_ids are a list of ids found in the context tree and not in the previous requests. You should never request for "root".
+   For reasoning, explain what the user needs, and why you need more details in the request targets, and how you will use the information.
 6. Once you have the necessary information, answer like this:
-   {"response_type": "answer", "content": "<answer>", "references": ["<node_id>", ...]}
+   {"response_type": "answer", "content": "<answer>", "reasoning":"<reasoning>", "references": ["<node_id>", ...]}
+   For reasoning, explain how you used the information provided in the context to generate the answer.
 7. Use double quotes for keys and values in JSON strings. Reply only with JSON strings.
-8. If your request is invalid, or you can't find the answer, request the "root" node_id or a different one.
-9. If you need the user to clarify the question, use "answer" as the response_type and request clarification.
+8. If your cannot find the answer, and you believe that without more information, you should always try requesting for details first before asking user for clarification.
 
 Reminders:
-- Avoid requesting previously requested node_ids. If you can't find the answer, request a different node_id or ask for clarification.
+- NEVER request previously requested node_ids. If you can't find the answer, request a different node_id or ask for clarification.
 - Pay close attention to the context tree. A node may have completely different contexts from another node on the same level.
 - Pay close attention to the previous questions. The user may be asking questions based on previous conversations.
 - Answer with as many details as possible, unless otherwise specified.
+- Understand and interpret the content of the documents. Don't just look for explicit text matches but also consider information that's implied or can be inferred.
+- Use the context to its fullest extent, including making inferences and drawing conclusions based on the available information. This can include inferring the author's intentions, comparing and contrasting ideas, summarizing key points, or compose new contents, etc.
+- The answer may not be explicitly stated in the document. Use your knowledge and understanding to reason and generate a meaningful response.
+- Use bullet points or tables to list items, use **bold** to highlight important points, use *italics* to refer to specific terms.
+- User may interact you in a conversational manner. You should be able to understand and respond to the user's questions and statements.
 
 Example:
 Context: {...}
-Previous Requests: ["doc.2"]
-Question: What is the thread model introduced in the paper?
-Assistant: {"response_type": "request", "targets": ["doc.3"], "original": true}
+Previous Requests: ["root", "doc.1", "doc.2"]
+Question: What is the threat model introduced in the paper?
+Assistant: {"response_type": "request", "targets": ["doc.3"], "reasoning": "User is asking for the threat model in the paper. doc.3 has title Threat Model, and is not in previous requests. I should be able to find details about the threat model in the original text in this node.", "original": true}
+
+Example:
+Context: {...}
+Previous Requests: ["root", "doc.1", "doc.2", "doc.3"]
+Question: What is the threat model introduced in the paper?
+Assistant: {"response_type": "answer", "content": "The threat model introduced in the paper is ...", "reasoning": "I found the answer in the original text in doc.3. I used the information provided in the context to generate the answer.", "references": ["doc.3"]}
 """
 
 class ContextChatBot:
@@ -41,7 +54,7 @@ class ContextChatBot:
         self.curr_question = curr_question
         self.current_contexts = str(self.root_node.get_context(1))
         self.clipboard_mode = clipboard_mode
-        self.previous_requests = []
+        self.previous_requests = ["root"]
 
     def load_contexts(self, file_path: str):
         with open(file_path, "r") as f:
@@ -63,11 +76,11 @@ class ContextChatBot:
         print(user_message.content)
         if self.clipboard_mode:
             print("The message has been copied to your clipboard")
-            input("Press enter to continue")
+            # input("Press enter to continue")
             clipboard.copy(user_message.content)
             response_content = input("Please paste the AI response:\n")
         else:
-            input("Press enter to continue")
+            # input("Press enter to continue")
             response_message = send_messages(self.history + [user_message])
             self.history += [Message("user", f"Question: {question}\n")] + [response_message]
             response_content = response_message.content
@@ -81,23 +94,25 @@ class ContextChatBot:
         json_reminder = "Remember to output a valid JSON string.\n"
         return Message("user", context_prompt + previous_requests_prompt + question_prompt + json_reminder)
 
-    def process_response(self, response_content: str):
+    def process_response(self, response_content: str) -> Tuple[str, str, List[str]]:
         response_content = self.extract_json(response_content)
         print(f"Raw response: {response_content}")
 
         response, is_json = self.load_json(response_content)
         if not is_json:
-            return response_content, []
+            return response_content, "", []
 
         if response['response_type'] == 'request':
-            self.previous_requests += response['targets']
+            for target in response['targets']:
+                if target in self.previous_requests:
+                    response['targets'].remove(target)
             return self.handle_request_response(response)
         elif response['response_type'] == 'answer':
-            self.previous_requests = []
+            self.previous_requests = ["root"]
             return self.handle_answer_response(response)
         else:
             print("Invalid response type")
-            return response_content, []
+            return response_content, "", []
 
     # Additional helper methods
     def extract_json(self, content: str):
@@ -117,13 +132,17 @@ class ContextChatBot:
             self.pop_history(2)
         print(f"AI requesting node_id: {response['targets']}")
         node_ids = response['targets']
-        nodes, contexts = self.get_nodes_and_contexts(node_ids, response["original"])
+        original = False
+        if "original" in response.keys():
+            original = response["original"]
+        nodes, contexts = self.get_nodes_and_contexts(node_ids, original)
 
         if nodes:
             self.history.append(Message("assistant", str(response)))
+            self.previous_requests += response['targets']
             return self.ask(self.curr_question, contexts)
         else:
-            return self.ask("Request is invalid", self.current_contexts)
+            return self.ask("Request is invalid. Try to request for a valid id." + self.curr_question, self.current_contexts)
 
     def get_nodes_and_contexts(self, node_ids: list, original: bool):
         nodes = []
@@ -139,10 +158,11 @@ class ContextChatBot:
             contexts += str(node.get_context(1, original)) + "\n"
         return nodes, contexts
 
-    def handle_answer_response(self, response: dict):
+    def handle_answer_response(self, response: dict) -> Tuple[str, str, List[str]]:
         answer = response['content']
+        reasoning = response['reasoning']
         references = response.get('references', [])
-        return answer, references
+        return answer, reasoning, references
 
 def main():
     parser = argparse.ArgumentParser(description="Interact with ContextChatBot")
@@ -188,10 +208,12 @@ def main():
         question = input("Enter your question\n> ")
         if question.lower() == 'exit':
             break
-        answer, references = chatbot.ask(question)
+        answer, reasoning, references = chatbot.ask(question)
         print(f"Assistant\n> {answer}\n")
         if references:
             print(f"References: {references}\n")
+        if reasoning:
+            print(f"Reasoning: {reasoning}\n")
 
 def is_valid_json(file_path: str) -> bool:
     try:
