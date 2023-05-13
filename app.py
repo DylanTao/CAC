@@ -22,6 +22,14 @@ with st.sidebar:
                 chatbot.root_node.add_child(ContextNode.from_dict(data))
 
 with tabs[0]:
+    # Allow user to change root node id and title
+    root_id = st.text_input("Root node id", chatbot.root_node.node_id)
+    root_title = st.text_input("Root node title", chatbot.root_node.title)
+    if st.button("Update root node"):
+        chatbot.root_node.node_id = root_id
+        chatbot.root_node.title = root_title
+    # Download current context tree
+    st.download_button("Download this context tree", json.dumps(chatbot.root_node.to_dict(), indent=4), chatbot.root_node.node_id + ".json", "text/json")
     st.json(chatbot.root_node.to_dict())
 
 history = []
