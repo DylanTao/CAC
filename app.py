@@ -40,7 +40,7 @@ with tabs[1]:
             for ref in references:
                 node = chatbot.root_node.get_node(ref)
                 if node is not None:
-                    st.json(node.get_context(0))
+                    st.json(node.get_context(1))
 with tabs[2]:
     for message in history:
         st.markdown(message)
