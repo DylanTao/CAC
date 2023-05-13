@@ -6,15 +6,17 @@ from api import Message, send_messages
 
 SYSTEM_PROMPT = """
 You will be given a long text in triple single quotes. Think about this step by step:
-- User will specify the compression ratio and maximum word count.
+- User will specify the compression ratio and maximum word count, and describe the text.
 - Generate a short title that describes the content of the text.
 - Generate a short summary of the text that is compressed to the specified compression ratio and 
 maximum word count.
 - The summary must maintain the original meaning, tense, tone, and structure.
 - The summary should be one paragraph.
+- Use the description to think about what information is important and should be included in the summary.
 - You MUST output your title and summary in JSON format.
 Example:
 User:
+Description: A research paper on the topic of NLP.
 Compression ratio: 1/4
 Maximum word count: 150
 Text: '''Example text'''
@@ -22,25 +24,9 @@ Assistant:
 {"summary": "Example summary", "title": "Example title"}
 """
 
-def compress(text, compression_ratio: str = "1/4", max_words: int = "150") -> Tuple[str, str]:
-    # Divide text into chunks if it is longer than 2000 words
-    if len(text.split(" ")) >= 2000:
-        chunks = []
-        current_chunk = ""
-        for sentence in text.split(". "):
-            if len(current_chunk.split(" ")) + len(sentence.split(" ")) > 2000:
-                chunks.append(current_chunk)
-                current_chunk = ""
-            current_chunk += sentence + ". "
-        chunks.append(current_chunk)
-        # Compress each chunk
-        compressed_chunks = []
-        for chunk in chunks:
-            compressed_chunks.append(compress(chunk, compression_ratio, max_words))
-        # Compress all chunks into one
-        return compress("\n".join(compressed_chunks), compression_ratio, max_words)
+def compress(text, compression_ratio: str = "1/4", max_words: int = "200", desc: str = "document") -> Tuple[str, str]:
     system_messages = [Message("system", SYSTEM_PROMPT)]
-    user_prompt = ""
+    user_prompt = f"Description: {desc}\n"
     user_prompt += f"Compression ratio: {compression_ratio}\n"
     user_prompt += f"Maximum word count: {max_words}\n"
     user_prompt += f"Text: '''{text}'''\n"
