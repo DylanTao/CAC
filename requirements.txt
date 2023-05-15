@@ -4,3 +4,4 @@ openai
 streamlit
 nltk
 clipboard
+tiktoken
