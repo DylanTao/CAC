@@ -2,7 +2,6 @@ import json
 from typing import Tuple
 from api import Message, send_messages
 
-# TODO: Use tiktoken to count the tokenized text length
 
 SYSTEM_PROMPT = """
 You will be given a long text in triple single quotes. Think about this step by step:

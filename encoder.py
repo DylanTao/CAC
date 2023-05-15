@@ -129,7 +129,7 @@ class ContextNode:
             context["children"].append(child.get_context(depth - 1, original=False))
         return context
     
-    def prepend_node_id(self, node_id):
+    def prepend_node_id(self, node_id: str):
         if not self.node_id.startswith(node_id):
             self.node_id = node_id + "." + self.node_id
         for child in self.children:
