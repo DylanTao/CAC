@@ -24,7 +24,7 @@ As an AI, you provide answers to questions based on JSON-formatted documents. Fo
 8. If your cannot find the answer, and you believe that without more information, you should always try requesting for details first before asking user for clarification.
 
 Reminders:
-- NEVER request previously requested node_ids. If you can't find the answer, request a different node_id or ask for clarification.
+- NEVER request previously requested node_ids. If you can't find the answer, request a different node_id with "request" type, or ask for clarification with "answer" type.
 - Pay close attention to the context tree. A node may have completely different contexts from another node on the same level.
 - Pay close attention to the previous questions. The user may be asking questions based on previous conversations.
 - Answer with as many details as possible, unless otherwise specified.
@@ -32,7 +32,8 @@ Reminders:
 - Use the context to its fullest extent, including making inferences and drawing conclusions based on the available information. This can include inferring the author's intentions, comparing and contrasting ideas, summarizing key points, or compose new contents, etc.
 - The answer may not be explicitly stated in the document. Use your knowledge and understanding to reason and generate a meaningful response.
 - Use bullet points or tables to list items, use **bold** to highlight important points, use *italics* to refer to specific terms.
-- User may interact you in a conversational manner. You should be able to understand and respond to the user's questions and statements.
+- User may interact you in a conversational manner. For example, they may give you suggestions on your previous responses, or ask you to clarify your previous responses.
+- If user wants you to be creative, you should utilize the context and generate a creative response. Don't just find answers in the context and repeat them.
 
 Example:
 Context: {...}
@@ -56,18 +57,30 @@ class ContextChatBot:
         self.clipboard_mode = clipboard_mode
         self.previous_requests = ["root"]
 
-    def load_contexts(self, file_path: str):
+    def read_json_file(self, file_path: str):
+        """
+        Read a JSON file and load the contexts into the chatbot.
+        """
         with open(file_path, "r") as f:
             json_string = f.read()
         self.root_node = ContextNode.from_json(json_string)
 
     def pop_history(self, n: int = 1):
+        """
+        Pop the earliest n messages from the history. Keep the first system message.
+        """
         self.history = self.history[:1] + self.history[1+n:]
 
     def reset_history(self):
+        """
+        Reset the history to the initial state with only the system prompt.
+        """
         self.history = [Message("system", SYSTEM_PROMPT)]
 
-    def ask(self, question: str, contexts: str = ""):
+    def ask(self, question: str, contexts: str = "") -> Tuple[str, str, List[str]]:
+        """
+        Ask a question and return the response.
+        """
         self.curr_question = question
         if contexts == "":
             contexts = self.current_contexts
@@ -78,7 +91,15 @@ class ContextChatBot:
             print("The message has been copied to your clipboard")
             # input("Press enter to continue")
             clipboard.copy(user_message.content)
-            response_content = input("Please paste the AI response:\n")
+            print("Please paste the AI response: Ctrl D to submit")
+            response_content = ""
+            while True:
+                try:
+                    line = input()
+                except EOFError:
+                    break
+                response_content += line
+            response_content = response_content.strip()
         else:
             # input("Press enter to continue")
             response_message = send_messages(self.history + [user_message])
@@ -87,14 +108,20 @@ class ContextChatBot:
 
         return self.process_response(response_content)
 
-    def prepare_user_message(self, question: str, contexts: str):
+    def prepare_user_message(self, question: str, contexts: str) -> Message:
+        """
+        Construct a user message with the given question and contexts.
+        """
         question_prompt = f"Question: {question}\n"
         context_prompt = f"Contexts: {contexts}\n"
         previous_requests_prompt = f"Previous Requests: {self.previous_requests}\n"
-        json_reminder = "Remember to output a valid JSON string.\n"
+        json_reminder = "For request, your JSON string should contain the following keys: response_type, targets, reasoning, original. For answer, your JSON string should contain the following keys: response_type, content, reasoning, references.\n"
         return Message("user", context_prompt + previous_requests_prompt + question_prompt + json_reminder)
 
     def process_response(self, response_content: str) -> Tuple[str, str, List[str]]:
+        """
+        Process the response and return the response content, reasoning, and references.
+        """
         response_content = self.extract_json(response_content)
         print(f"Raw response: {response_content}")
 
@@ -159,10 +186,24 @@ class ContextChatBot:
         return nodes, contexts
 
     def handle_answer_response(self, response: dict) -> Tuple[str, str, List[str]]:
-        answer = response['content']
-        reasoning = response['reasoning']
-        references = response.get('references', [])
+        answer = response['content'] if 'content' in response.keys() else "No content in response"
+        reasoning = response['reasoning'] if 'reasoning' in response.keys() else "No reasoning in response"
+        references = response.get('references', []) if 'references' in response.keys() else []
         return answer, reasoning, references
+
+    def regenerate_response(self):
+        """
+        Deletes the 2 most recent history and asks the model again with the same question and contexts
+        """
+        if len(self.history) >= 2:
+            # Removing the 2 most recent entries in history
+            self.pop_history(2)
+            
+            # Asking the model again with the same question and contexts
+            return self.ask(self.curr_question, self.current_contexts)
+        else:
+            print("Not enough history to regenerate response")
+            return None
 
 def main():
     parser = argparse.ArgumentParser(description="Interact with ContextChatBot")
@@ -205,8 +246,17 @@ def main():
         clipboard.copy(SYSTEM_PROMPT)
         input("Now, paste the first system prompt into the chatbot. Press enter to continue.")
     while True:
-        question = input("Enter your question\n> ")
-        if question.lower() == 'exit':
+        # question = input("Enter your question\n> ")
+        question = ""
+        print("Enter your question. Ctrl-D to submit.")
+        while True:
+            try:
+                line = input()
+            except EOFError:
+                break
+            question += line + "\n"
+        question = question.strip()
+        if question.lower() == "exit":
             break
         answer, reasoning, references = chatbot.ask(question)
         print(f"Assistant\n> {answer}\n")
