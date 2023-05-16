@@ -43,7 +43,7 @@ class ContextNode:
             "children": [child.to_dict() for child in self.children],
         }
 
-    def to_json(self, indent=None):
+    def to_json(self, indent=4):
         return json.dumps(self.to_dict(), indent=indent)
     
     @classmethod
@@ -58,9 +58,6 @@ class ContextNode:
             child = cls.from_dict(child_data)
             node.add_child(child)
         return node
-
-    def to_json(self, indent=None):
-        return json.dumps(self.to_dict(), indent=indent)
     
     @classmethod
     def from_json(cls, json_string):
@@ -283,7 +280,7 @@ def parse_paper(file_path):
     root_node.prepend_node_id(root_id)
     return root_node
 
-def parse_unstructured(file_path):
+def parse_unstructured(file_path: str):
     root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     text = ""
     if file_path.endswith(".pdf"):
