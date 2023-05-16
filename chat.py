@@ -118,7 +118,8 @@ class ContextChatBot:
         question_prompt = f"Question: {question}\n"
         context_prompt = f"Contexts: {contexts}\n"
         previous_requests_prompt = f"Previous Requests: {self.previous_requests}\n"
-        json_reminder = "For request, your JSON string should contain the following keys: response_type, targets, reasoning, original. For answer, your JSON string should contain the following keys: response_type, content, reasoning, references.\n"
+        json_reminder = "For request, your JSON string should contain the following keys: response_type, targets, reasoning, original.\
+            For answer, your JSON string should contain the following keys: response_type, content, reasoning, references.\n"
         return Message("user", context_prompt + previous_requests_prompt + question_prompt + json_reminder)
 
     def process_response(self, response_content: str) -> Tuple[str, str, List[str]]:
