@@ -1,13 +1,14 @@
 import streamlit as st
 import json
-from chat import ContextChatBot
+import clipboard
+from chat import ContextChatBot, SYSTEM_PROMPT
 from encoder import ContextNode
 
 # Create an instance of the chatbot
 chatbot = ContextChatBot(ContextNode("root"))
 
 # Create a title and a subtitle
-tabs = st.tabs(["Context Tree", "Chat", "History"])
+tabs = st.tabs(["Context Tree", "Chat", "History", "Clipboard Chat"])
 
 # Side bar for file upload
 with st.sidebar:
@@ -44,11 +45,17 @@ with tabs[1]:
         st.markdown(f"**Answer:**\n\n{answer}")
         st.markdown(f"**Reasoning:**\n\n{reasoning}")
         st.markdown(f"**References:**\n\n{references}")
+        if len(history) >= 2:  # there is at least one question and one answer
+            regenerate = st.button("Regenerate Response")
+            if regenerate:
+                # Here we call the regenerate_response method to regenerate the response
+                chatbot.regenerate_response()
         with st.expander("Show context"):
             for ref in references:
                 node = chatbot.root_node.get_node(ref)
                 if node is not None:
                     st.json(node.get_context(1))
+            
 with tabs[2]:
     for message in history:
         st.markdown(message)

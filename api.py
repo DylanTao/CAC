@@ -16,7 +16,7 @@ def send_messages(messages: List[Message]) -> Message:
     completion = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[message.to_dict() for message in messages],
-        temperature=0.5
+        temperature=0.9
     )
     response_message = Message(completion['choices'][0]['message']['role'],completion['choices'][0]['message']['content'])
     return response_message
