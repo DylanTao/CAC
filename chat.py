@@ -49,6 +49,9 @@ Assistant: {"response_type": "answer", "content": "The threat model introduced i
 """
 
 class ContextChatBot:
+    """
+    A chatbot that answers questions based on JSON-formatted contexts.
+    """
     def __init__(self, root_node: ContextNode, curr_question: str = "", clipboard_mode: bool = False):
         self.root_node = root_node
         self.history = [Message("system", SYSTEM_PROMPT)]
