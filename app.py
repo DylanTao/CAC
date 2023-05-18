@@ -29,13 +29,19 @@ def handle_nonjson(file):
         with open(file_name, "wb") as f:
             f.write(file.getbuffer())
         root_node = parse_unstructured(file_name)
-    root_node.apply_word_limit()
-    root_node.generate_summary(True, title=True)
+
     # delete temporary file
     os.remove(file_name)
 
-    # save the root node to a json file
-    with open(file_name + ".json", "w") as f:
+    # apply word limit and generate summary
+    root_node.apply_word_limit()
+    root_node.generate_summary(True, title=True)
+
+    # save the root node to a json file (remove .xxx extension if any)
+    file_name = file_name.split(".")[0]
+    # put the json file in the data folder
+    file_name = os.path.join("data", file_name + ".json")
+    with open(file_name, "w") as f:
         f.write(root_node.to_json())
 
     return root_node
