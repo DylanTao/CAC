@@ -51,9 +51,6 @@ graph TB
     A["Document"] -- "Parser Processes" --> B["Context Tree (Root and Leaf Nodes)"]
     B -- "LLM Generates Summary (Post-Order Traversal)" --> C["Summary for Each Node"]
     C -- "LLM Reconstructs" --> D["Multi-Level Context Tree"]
-    linkStyle 0 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 1 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 2 stroke:#2ecd71,stroke-width:2px;
 ```
 
 ### Chatting
@@ -82,12 +79,4 @@ graph TB
     F --> G
     G --> H
     H --> C
-    linkStyle 0 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 1 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 2 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 3 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 4 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 5 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 6 stroke:#2ecd71,stroke-width:2px;
-    linkStyle 7 stroke:#2ecd71,stroke-width:2px;
 ```
