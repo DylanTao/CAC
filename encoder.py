@@ -2,8 +2,28 @@ import PyPDF2
 import json
 import argparse
 import os
+from gensim import corpora, models
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
 from tqdm import tqdm
 from llm_compressor import compress
+from typing import List
+
+def preprocess_text(text) -> List[str]:
+    # Tokenize, remove stopwords and non-alphabetical tokens
+    stop_words = set(stopwords.words('english'))
+    return [word for word in word_tokenize(text.lower()) if word.isalpha() and word not in stop_words]
+
+def identify_topics(texts, num_topics):
+    # Create a Gensim dictionary from the texts
+    dictionary = corpora.Dictionary(texts)
+    # Use the dictionary to prepare a DTM (Document Term Matrix)
+    dtm = [dictionary.doc2bow(doc) for doc in texts]
+    # Create an LDA model
+    lda_model = models.LdaModel(dtm, num_topics=num_topics, id2word=dictionary, passes=2)
+    # Get the dominant topic for each sentence
+    topics = [max(lda_model[doc], key=lambda x: x[1])[0] for doc in dtm if lda_model[doc]]
+    return topics
 
 class TOCNode:
     def __init__(self, node_id: str, title: str, page_number: int):
@@ -163,6 +183,51 @@ class ContextNode:
         if recursive:
             for child in self.children:
                 child.apply_word_limit(limit, overlap, recursive)
+    
+    def build_tree(self, num_topics: int = 0, max_tokens: int = 2000, recursive: bool = True):
+        """
+        Generate context tree for unstructured text. This will not preserve the original flow of the text.
+
+        Args:
+            num_topics (int, optional): Maximum number of topics on the first level. Defaults to 0.
+            max_tokens (int, optional): Ideal maximum token size. Defaults to 2000.
+        """
+        print(f"Token count for {self.node_id}: {len(word_tokenize(self.content))}")
+        text = self.content
+        self.content = ""
+        # Split text into sentences
+        sentences = sent_tokenize(text)
+        # Preprocess sentences
+        texts = [preprocess_text(sentence) for sentence in sentences]
+        if num_topics == 0:
+            # Predict number of topics
+            token_count = len(word_tokenize(text))
+            num_topics = min(10, (token_count // max_tokens))
+        # Identify topics
+        topics = identify_topics(texts, num_topics)
+        # Get the actual number of topics
+        num_topics = len(set(topics))
+        print("Number of topics:", num_topics)
+        if num_topics == 1:
+            self.content = text
+            return
+        for i, topic in enumerate(topics):
+            topic_id = f"{self.node_id}.{topic + 1}"
+            # Check if the topic node already exists, if not create it
+            topic_node = next((child for child in self.children if child.node_id == topic_id), None)
+            if not topic_node:
+                topic_node = ContextNode(topic_id)
+                self.add_child(topic_node)
+            # Add the sentence node to the topic node
+            sentence = sentences[i]
+            topic_node.content += f" {sentence}"
+        
+        # Recursively build tree for child nodes
+        if recursive:
+            for child in self.children:
+                token_count = len(word_tokenize(child.content))
+                if token_count > max_tokens:
+                    child.build_tree(0, max_tokens)
 
 def extract_text_from_pdf(file_path):
     print(f"Extracting text from {file_path}")
