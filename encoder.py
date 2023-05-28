@@ -192,7 +192,8 @@ class ContextNode:
             num_topics (int, optional): Maximum number of topics on the first level. Defaults to 0.
             max_tokens (int, optional): Ideal maximum token size. Defaults to 2000.
         """
-        print(f"Token count for {self.node_id}: {len(word_tokenize(self.content))}")
+        token_count = len(word_tokenize(self.content))
+        print(f"Token count for {self.node_id}: {token_count}")
         text = self.content
         self.content = ""
         # Split text into sentences
@@ -345,7 +346,7 @@ def parse_paper(file_path):
     root_node.prepend_node_id(root_id)
     return root_node
 
-def load_unstructured(file_path: str):
+def load_unstructured(file_path: str, num_topics: int = 10):
     root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     text = ""
     if file_path.endswith(".pdf"):
@@ -356,7 +357,7 @@ def load_unstructured(file_path: str):
     else:
         raise Exception("Unsupported file format")
     root_node = ContextNode(root_id, root_id, text)
-    root_node.build_tree()
+    root_node.build_tree(num_topics)
     return root_node
 
 def parse_by_page(file_path):
