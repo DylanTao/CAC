@@ -10,7 +10,6 @@ chatbot = ContextChatBot(ContextNode("root"))
 
 # Create a title and a subtitle
 encoder_tab, context_tree_tab, chat_tab, history_tab = st.tabs(["Customize Encoder","Context Tree", "Chat", "History"])
-tabs = st.tabs(["Context Tree", "Chat", "History"])
 
 # Side bar for file upload
 def handle_json(file):
