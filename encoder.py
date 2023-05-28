@@ -345,7 +345,7 @@ def parse_paper(file_path):
     root_node.prepend_node_id(root_id)
     return root_node
 
-def parse_unstructured(file_path: str):
+def load_unstructured(file_path: str):
     root_id = "".join(file_path.split("/")[-1].split(".")[0:-1]).replace(" ", "_")
     text = ""
     if file_path.endswith(".pdf"):
@@ -356,6 +356,7 @@ def parse_unstructured(file_path: str):
     else:
         raise Exception("Unsupported file format")
     root_node = ContextNode(root_id, root_id, text)
+    root_node.build_tree()
     return root_node
 
 def parse_by_page(file_path):
@@ -411,7 +412,7 @@ def main():
 
     for file_path in file_paths:
         if args.unstructured:
-            root_node = parse_unstructured(args.input)
+            root_node = load_unstructured(args.input)
             root_node.apply_word_limit()
             root_node.generate_summary(True, args.compression_ratio, True, args.desc)
         elif args.page:

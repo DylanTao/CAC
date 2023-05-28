@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import clipboard
 from chat import ContextChatBot, SYSTEM_PROMPT
-from encoder import ContextNode, parse_unstructured, extract_text_from_pdf
+from encoder import ContextNode, load_unstructured, extract_text_from_pdf
 import os
 
 # Create an instance of the chatbot
@@ -22,13 +22,13 @@ def handle_nonjson(file):
         file_name = file.name
         with open(file_name, "w") as f:
             f.write(file.getvalue().decode("utf-8"))
-        root_node = parse_unstructured(file_name)
+        root_node = load_unstructured(file_name)
     else:  # assume file is a PDF
         # copy pdf to a temporary file
         file_name = file.name
         with open(file_name, "wb") as f:
             f.write(file.getbuffer())
-        root_node = parse_unstructured(file_name)
+        root_node = load_unstructured(file_name)
     root_node.apply_word_limit()
     root_node.generate_summary(True, title=True)
     # delete temporary file
