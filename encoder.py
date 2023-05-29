@@ -184,7 +184,7 @@ class ContextNode:
             for child in self.children:
                 child.apply_word_limit(limit, overlap, recursive)
     
-    def build_tree(self, num_topics: int = 0, max_tokens: int = 2000, recursive: bool = True):
+    def build_tree(self, num_topics: int = 0, max_tokens: int = 1000, recursive: bool = True):
         """
         Generate context tree for unstructured text. This will not preserve the original flow of the text.
 
@@ -414,7 +414,6 @@ def main():
     for file_path in file_paths:
         if args.unstructured:
             root_node = load_unstructured(args.input)
-            root_node.apply_word_limit()
             root_node.generate_summary(True, args.compression_ratio, True, args.desc)
         elif args.page:
             root_node = parse_by_page(args.input)
