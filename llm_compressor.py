@@ -1,7 +1,7 @@
 import json
+import re
 from typing import Tuple
 from api import Message, send_messages
-
 
 SYSTEM_PROMPT = """
 You will be given a long text in triple single quotes. Think about this step by step:
@@ -22,6 +22,8 @@ Text: '''Example text'''
 Assistant:
 {"summary": "Example summary", "title": "Example title"}
 """
+def remove_control_characters(s):
+    return re.sub(r'[\x00-\x1f\x7f-\x9f]', '', s)
 
 def compress(text, compression_ratio: str = "1/4", max_words: int = "200", desc: str = "document") -> Tuple[str, str]:
     system_messages = [Message("system", SYSTEM_PROMPT)]
@@ -39,6 +41,7 @@ def compress(text, compression_ratio: str = "1/4", max_words: int = "200", desc:
         title = ""
     else:
         # Find the first { and last } to get the JSON
+        response_message.content = remove_control_characters(response_message.content)
         response_json = json.loads(response_message.content[response_message.content.find("{"):response_message.content.rfind("}")+1])
         summary = response_json["summary"]
         title = response_json["title"]
